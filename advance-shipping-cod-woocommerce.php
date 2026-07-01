@@ -229,9 +229,9 @@ function wcasc_render_settings_page() {
 					<th><label for="wcasc_advance_cost_type"><?php esc_html_e( 'Advance Cost Type', 'wcasc' ); ?></label></th>
 					<td>
 						<select id="wcasc_advance_cost_type" name="wcasc_advance_cost_type">
-							<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'By Shipping Method', 'wcasc' ); ?></option>
-							<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'By Custom Price', 'wcasc' ); ?></option>
-							<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both', 'wcasc' ); ?></option>
+							<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'Shipping Method Price', 'wcasc' ); ?></option>
+							<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'Custom Price Only', 'wcasc' ); ?></option>
+							<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both (Shipping Price + Custom Price)', 'wcasc' ); ?></option>
 						</select>
 						<p class="description">
 							<?php esc_html_e( 'Choose how the advance amount is calculated for orders matching the selected shipping method.', 'wcasc' ); ?>
@@ -243,7 +243,7 @@ function wcasc_render_settings_page() {
 					<td>
 						<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( $custom_advance_price ); ?>" />
 						<p class="description">
-							<?php esc_html_e( 'Used when Advance Cost Type is set to By Custom Price or Both.', 'wcasc' ); ?>
+							<?php esc_html_e( 'Used when Advance Cost Type is set to Custom Price Only or Both.', 'wcasc' ); ?>
 						</p>
 					</td>
 				</tr>
