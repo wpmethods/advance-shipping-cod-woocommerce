@@ -7,8 +7,9 @@
  * Author:      WP Methods, Ajharul Islam
  * Text Domain: wcasc
  * Requires Plugins: woocommerce
- * Requires at least: 5.0
- * Tested up to: 7.6
+ * Requires at least: 5.2
+ * Tested up to: 7.0
+ * Requires PHP: 7.4
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
