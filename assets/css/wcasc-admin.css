@@ -1,0 +1,145 @@
+.wcasc-settings-wrap {
+    max-width: 1400px;
+}
+
+.wcasc-settings-wrap .wcasc-hero {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+    color: #fff;
+    padding: 24px 28px;
+    border-radius: 16px;
+    margin: 20px 0 24px;
+    box-shadow: 0 10px 30px rgba(37, 99, 235, 0.18);
+}
+
+.wcasc-settings-wrap .wcasc-hero h1 {
+    margin: 0 0 8px;
+    color: #fff;
+    font-size: 28px;
+}
+
+.wcasc-settings-wrap .wcasc-hero p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.wcasc-settings-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) 320px;
+    gap: 24px;
+    align-items: start;
+}
+
+.wcasc-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    margin-bottom: 24px;
+}
+
+.wcasc-card h2,
+.wcasc-card h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #0f172a;
+}
+
+.wcasc-card .description {
+    color: #64748b;
+    font-size: 13px;
+    margin-top: 6px;
+}
+
+.wcasc-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+}
+
+.wcasc-table th,
+.wcasc-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.wcasc-table thead th {
+    background: #f8fafc;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #475569;
+}
+
+.wcasc-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.wcasc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.wcasc-badge--enabled {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.wcasc-badge--disabled {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.wcasc-support-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.wcasc-support-list a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #f8fafc;
+    color: #0f172a;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
+}
+
+.wcasc-support-list a:hover {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+
+.wcasc-tip-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #475569;
+}
+
+.wcasc-tip-list li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.wcasc-custom-price-row.is-hidden {
+    display: none;
+}
+
+@media (max-width: 1100px) {
+    .wcasc-settings-grid {
+        grid-template-columns: 1fr;
+    }
+}

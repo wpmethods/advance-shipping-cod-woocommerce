@@ -3,17 +3,19 @@
  * Plugin Name: Advance Shipping COD for WooCommerce
  * Plugin URI:  https://wpmethods.com
  * Description: Select one or more shipping methods from the admin panel. When a customer selects that shipping method at checkout, Cash on Delivery (COD) is automatically hidden and only the shipping charge is collected online in advance — the product price is collected as COD at the time of delivery.
- * Version:     2.4.0
+ * Version:     1.0.0
  * Author:      WP Methods, Ajharul Islam
  * Text Domain: wcasc
  * Requires Plugins: woocommerce
+ * Requires at least: 5.0
+ * Tested up to: 7.6
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WCASC_VERSION', '2.4.0' );
+define( 'WCASC_VERSION', '1.0.0' );
 define( 'WCASC_OPTION_KEY', 'wcasc_selected_shipping_methods' );
 define( 'WCASC_TEXTS_KEY', 'wcasc_texts' );
 define( 'WCASC_ADVANCE_COST_TYPE_KEY', 'wcasc_advance_cost_type' );
@@ -132,6 +134,17 @@ function wcasc_add_admin_menu() {
 	);
 }
 
+add_action( 'admin_enqueue_scripts', 'wcasc_enqueue_admin_assets' );
+function wcasc_enqueue_admin_assets( $hook_suffix ) {
+	if ( 'woocommerce_page_wcasc-settings' !== $hook_suffix ) {
+		return;
+	}
+
+	$plugin_url = plugin_dir_url( __FILE__ );
+	wp_enqueue_style( 'wcasc-admin-css', $plugin_url . 'assets/css/wcasc-admin.css', array(), WCASC_VERSION );
+	wp_enqueue_script( 'wcasc-admin-js', $plugin_url . 'assets/js/wcasc-admin.js', array( 'jquery' ), WCASC_VERSION, true );
+}
+
 /**
  * Get all shipping methods (with rate_id) from every shipping zone.
  */
@@ -190,7 +203,7 @@ function wcasc_render_settings_page() {
 		update_option( WCASC_OPTION_KEY, $selected );
 		update_option( WCASC_ADVANCE_COST_TYPE_KEY, $advance_cost_type );
 		update_option( WCASC_CUSTOM_ADVANCE_PRICE_KEY, $custom_advance_price );
-		echo '<div class="updated"><p>' . esc_html__( 'Shipping method settings saved successfully.', 'wcasc' ) . '</p></div>';
+		echo '<div class="updated"><p>' . esc_html__( 'Shipping method and advance cost settings saved successfully.', 'wcasc' ) . '</p></div>';
 	}
 
 	/* ---- Save customizable texts ---- */
@@ -208,144 +221,179 @@ function wcasc_render_settings_page() {
 		echo '<div class="updated"><p>' . esc_html__( 'Text settings saved successfully.', 'wcasc' ) . '</p></div>';
 	}
 
-	$selected           = get_option( WCASC_OPTION_KEY, array() );
-	$methods            = wcasc_get_all_shipping_methods();
-	$texts              = wcasc_get_texts();
-	$advance_cost_type  = wcasc_get_advance_cost_type();
+	$selected            = get_option( WCASC_OPTION_KEY, array() );
+	$methods             = wcasc_get_all_shipping_methods();
+	$texts               = wcasc_get_texts();
+	$advance_cost_type   = wcasc_get_advance_cost_type();
 	$custom_advance_price = wcasc_get_custom_advance_price();
 	?>
-	<div class="wrap">
-		<h1><?php esc_html_e( 'Advance Shipping COD Settings', 'wcasc' ); ?></h1>
-		<p>
-			<?php esc_html_e( 'Check the shipping method(s) below that should trigger this feature. When a customer selects one of these methods at checkout, Cash on Delivery (COD) will automatically be hidden — only online payment methods will show, and only the shipping charge will be collected online in advance. The product price will be collected as COD at delivery.', 'wcasc' ); ?>
-		</p>
-
-		<form method="post">
-			<?php wp_nonce_field( 'wcasc_save_settings', 'wcasc_nonce' ); ?>
-
-			<h2><?php esc_html_e( 'Advance Cost Settings', 'wcasc' ); ?></h2>
-			<table class="form-table" style="max-width:900px;">
-				<tr>
-					<th><label for="wcasc_advance_cost_type"><?php esc_html_e( 'Advance Cost Type', 'wcasc' ); ?></label></th>
-					<td>
-						<select id="wcasc_advance_cost_type" name="wcasc_advance_cost_type">
-							<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'Shipping Method Price', 'wcasc' ); ?></option>
-							<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'Custom Price Only', 'wcasc' ); ?></option>
-							<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both (Shipping Price + Custom Price)', 'wcasc' ); ?></option>
-						</select>
-						<p class="description">
-							<?php esc_html_e( 'Choose how the advance amount is calculated for orders matching the selected shipping method.', 'wcasc' ); ?>
-						</p>
-					</td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_custom_advance_price"><?php esc_html_e( 'Custom Advance Price', 'wcasc' ); ?></label></th>
-					<td>
-						<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( $custom_advance_price ); ?>" />
-						<p class="description">
-							<?php esc_html_e( 'Used when Advance Cost Type is set to Custom Price Only or Both.', 'wcasc' ); ?>
-						</p>
-					</td>
-				</tr>
-			</table>
-
-			<?php if ( empty( $methods ) ) : ?>
-				<div class="notice notice-warning"><p>
-					<?php esc_html_e( 'No shipping methods found. Please set up shipping zones/methods first under WooCommerce → Settings → Shipping.', 'wcasc' ); ?>
-				</p></div>
-			<?php else : ?>
-			<table class="widefat striped" style="max-width:900px;">
-				<thead>
-					<tr>
-						<th style="width:40px;"></th>
-						<th><?php esc_html_e( 'Zone', 'wcasc' ); ?></th>
-						<th><?php esc_html_e( 'Shipping Method', 'wcasc' ); ?></th>
-						<th><?php esc_html_e( 'Status', 'wcasc' ); ?></th>
-						<th><?php esc_html_e( 'Rate ID', 'wcasc' ); ?></th>
-					</tr>
-				</thead>
-				<tbody>
-				<?php foreach ( $methods as $m ) : ?>
-					<tr>
-						<td>
-							<input type="checkbox" name="wcasc_methods[]"
-								value="<?php echo esc_attr( $m['rate_id'] ); ?>"
-								<?php checked( in_array( $m['rate_id'], $selected, true ) ); ?> />
-						</td>
-						<td><?php echo esc_html( $m['zone'] ); ?></td>
-						<td><?php echo esc_html( $m['title'] ); ?></td>
-						<td>
-							<?php if ( $m['enabled'] ) : ?>
-								<span style="color:#2e7d32;">&#9679; <?php esc_html_e( 'Enabled', 'wcasc' ); ?></span>
-							<?php else : ?>
-								<span style="color:#c62828;">&#9679; <?php esc_html_e( 'Disabled', 'wcasc' ); ?></span>
-							<?php endif; ?>
-						</td>
-						<td><code><?php echo esc_html( $m['rate_id'] ); ?></code></td>
-					</tr>
-				<?php endforeach; ?>
-				</tbody>
-			</table>
-			<p style="margin-top:15px;">
-				<button type="submit" name="wcasc_save" class="button button-primary">
-					<?php esc_html_e( 'Save Shipping Methods', 'wcasc' ); ?>
-				</button>
-			</p>
-		</form>
-		<?php endif; ?>
-
-		<hr style="margin:30px 0;" />
-
-		<h2><?php esc_html_e( 'Customize Texts', 'wcasc' ); ?></h2>
-		<p>
-			<?php esc_html_e( 'You can edit all customer-facing texts below. Available placeholders: {shipping_amount}, {due_amount}, {advance_amount}. Placeholders will automatically be replaced with the actual formatted prices.', 'wcasc' ); ?>
-		</p>
-		<form method="post">
-			<?php wp_nonce_field( 'wcasc_save_texts', 'wcasc_texts_nonce' ); ?>
-			<table class="form-table" style="max-width:900px;">
-				<tr>
-					<th><label for="wcasc_notice_heading"><?php esc_html_e( 'Checkout Notice Heading', 'wcasc' ); ?></label></th>
-					<td><input type="text" class="regular-text" id="wcasc_notice_heading" name="wcasc_text[notice_heading]" value="<?php echo esc_attr( $texts['notice_heading'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_notice_message"><?php esc_html_e( 'Checkout Notice Message', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {shipping_amount}, {due_amount}', 'wcasc' ); ?></small></th>
-					<td><textarea class="large-text" rows="3" id="wcasc_notice_message" name="wcasc_text[notice_message]"><?php echo esc_textarea( $texts['notice_message'] ); ?></textarea></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_order_review_heading"><?php esc_html_e( 'Checkout "Total" Label Override', 'wcasc' ); ?></label></th>
-					<td><input type="text" class="regular-text" id="wcasc_order_review_heading" name="wcasc_text[order_review_heading]" value="<?php echo esc_attr( $texts['order_review_heading'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_order_note"><?php esc_html_e( 'Order Note (added after payment)', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {advance_amount}, {due_amount}', 'wcasc' ); ?></small></th>
-					<td><textarea class="large-text" rows="2" id="wcasc_order_note" name="wcasc_text[order_note]"><?php echo esc_textarea( $texts['order_note'] ); ?></textarea></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_customer_advance_line"><?php esc_html_e( 'Customer Order View — Advance Line', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholder: {advance_amount}', 'wcasc' ); ?></small></th>
-					<td><input type="text" class="large-text" id="wcasc_customer_advance_line" name="wcasc_text[customer_advance_line]" value="<?php echo esc_attr( $texts['customer_advance_line'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_customer_due_line"><?php esc_html_e( 'Customer Order View — Due Line', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholder: {due_amount}', 'wcasc' ); ?></small></th>
-					<td><input type="text" class="large-text" id="wcasc_customer_due_line" name="wcasc_text[customer_due_line]" value="<?php echo esc_attr( $texts['customer_due_line'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_admin_advance_label"><?php esc_html_e( 'Admin Order Page — Advance Label', 'wcasc' ); ?></label></th>
-					<td><input type="text" class="regular-text" id="wcasc_admin_advance_label" name="wcasc_text[admin_advance_label]" value="<?php echo esc_attr( $texts['admin_advance_label'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_admin_due_label"><?php esc_html_e( 'Admin Order Page — Due Label', 'wcasc' ); ?></label></th>
-					<td><input type="text" class="regular-text" id="wcasc_admin_due_label" name="wcasc_text[admin_due_label]" value="<?php echo esc_attr( $texts['admin_due_label'] ); ?>" /></td>
-				</tr>
-				<tr>
-					<th><label for="wcasc_column_label"><?php esc_html_e( 'Orders List Column Label', 'wcasc' ); ?></label></th>
-					<td><input type="text" class="regular-text" id="wcasc_column_label" name="wcasc_text[column_label]" value="<?php echo esc_attr( $texts['column_label'] ); ?>" /></td>
-				</tr>
-			</table>
+	<div class="wrap wcasc-settings-wrap">
+		<div class="wcasc-hero">
+			<h1><?php esc_html_e( 'Advance Shipping COD Settings', 'wcasc' ); ?></h1>
 			<p>
-				<button type="submit" name="wcasc_save_texts" class="button button-primary">
-					<?php esc_html_e( 'Save Texts', 'wcasc' ); ?>
-				</button>
+				<?php esc_html_e( 'Control how advance payment works for selected shipping methods. Choose the cost type, manage trigger methods, and customize checkout messages from one polished admin dashboard.', 'wcasc' ); ?>
 			</p>
-		</form>
+		</div>
+
+		<div class="wcasc-settings-grid">
+			<div class="wcasc-main-column">
+				<div class="wcasc-card">
+					<h2><?php esc_html_e( 'Advance Cost Settings', 'wcasc' ); ?></h2>
+					<form method="post">
+						<?php wp_nonce_field( 'wcasc_save_settings', 'wcasc_nonce' ); ?>
+						<table class="form-table" style="max-width:900px;">
+							<tr>
+								<th><label for="wcasc_advance_cost_type"><?php esc_html_e( 'Advance Cost Type', 'wcasc' ); ?></label></th>
+								<td>
+									<select id="wcasc_advance_cost_type" name="wcasc_advance_cost_type">
+										<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'Shipping method price', 'wcasc' ); ?></option>
+										<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'Custom price', 'wcasc' ); ?></option>
+										<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both (Shipping price + Custom price)', 'wcasc' ); ?></option>
+									</select>
+									<p class="description">
+										<?php esc_html_e( 'Choose how the advance amount is calculated for matching shipping methods.', 'wcasc' ); ?>
+									</p>
+								</td>
+							</tr>
+							<tr class="wcasc-custom-price-row">
+								<th><label for="wcasc_custom_advance_price"><?php esc_html_e( 'Custom Advance Price', 'wcasc' ); ?></label></th>
+								<td>
+									<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( $custom_advance_price ); ?>" />
+									<p class="description">
+										<?php esc_html_e( 'Used when the advance type is set to By Custom Price or Both.', 'wcasc' ); ?>
+									</p>
+								</td>
+							</tr>
+						</table>
+
+						<div class="wcasc-card">
+							<h3 style="margin-bottom:8px;"><?php esc_html_e( 'Shipping Methods', 'wcasc' ); ?></h3>
+							<p style="margin-top:0; color:#64748b;">
+								<?php esc_html_e( 'Select the shipping methods that should trigger the advance payment flow at checkout.', 'wcasc' ); ?>
+							</p>
+							<?php if ( empty( $methods ) ) : ?>
+								<div class="notice notice-warning"><p>
+									<?php esc_html_e( 'No shipping methods found. Please set up shipping zones/methods first under WooCommerce → Settings → Shipping.', 'wcasc' ); ?>
+								</p></div>
+							<?php else : ?>
+								<table class="wcasc-table">
+									<thead>
+										<tr>
+											<th style="width:40px;"></th>
+											<th><?php esc_html_e( 'Zone', 'wcasc' ); ?></th>
+											<th><?php esc_html_e( 'Shipping Method', 'wcasc' ); ?></th>
+											<th><?php esc_html_e( 'Status', 'wcasc' ); ?></th>
+											<th><?php esc_html_e( 'Rate ID', 'wcasc' ); ?></th>
+										</tr>
+									</thead>
+									<tbody>
+									<?php foreach ( $methods as $m ) : ?>
+										<tr>
+											<td>
+												<input type="checkbox" name="wcasc_methods[]"
+													value="<?php echo esc_attr( $m['rate_id'] ); ?>"
+													<?php checked( in_array( $m['rate_id'], $selected, true ) ); ?> />
+											</td>
+											<td><?php echo esc_html( $m['zone'] ); ?></td>
+											<td><?php echo esc_html( $m['title'] ); ?></td>
+											<td>
+												<?php if ( $m['enabled'] ) : ?>
+													<span class="wcasc-badge wcasc-badge--enabled">● <?php esc_html_e( 'Enabled', 'wcasc' ); ?></span>
+												<?php else : ?>
+													<span class="wcasc-badge wcasc-badge--disabled">● <?php esc_html_e( 'Disabled', 'wcasc' ); ?></span>
+												<?php endif; ?>
+											</td>
+											<td><code><?php echo esc_html( $m['rate_id'] ); ?></code></td>
+										</tr>
+									<?php endforeach; ?>
+									</tbody>
+								</table>
+							<?php endif; ?>
+						</div>
+
+						<p style="margin-top:18px;">
+							<button type="submit" name="wcasc_save" class="button button-primary">
+								<?php esc_html_e( 'Save Settings', 'wcasc' ); ?>
+							</button>
+						</p>
+					</form>
+				</div>
+
+				<div class="wcasc-card">
+					<h2><?php esc_html_e( 'Customize Texts', 'wcasc' ); ?></h2>
+					<p class="description" style="margin-top:0;">
+						<?php esc_html_e( 'Edit the customer-facing messages from checkout to order confirmation.', 'wcasc' ); ?>
+					</p>
+					<form method="post">
+						<?php wp_nonce_field( 'wcasc_save_texts', 'wcasc_texts_nonce' ); ?>
+						<table class="form-table" style="max-width:900px;">
+							<tr>
+								<th><label for="wcasc_notice_heading"><?php esc_html_e( 'Checkout Notice Heading', 'wcasc' ); ?></label></th>
+								<td><input type="text" class="regular-text" id="wcasc_notice_heading" name="wcasc_text[notice_heading]" value="<?php echo esc_attr( $texts['notice_heading'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_notice_message"><?php esc_html_e( 'Checkout Notice Message', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {shipping_amount}, {due_amount}', 'wcasc' ); ?></small></th>
+								<td><textarea class="large-text" rows="3" id="wcasc_notice_message" name="wcasc_text[notice_message]"><?php echo esc_textarea( $texts['notice_message'] ); ?></textarea></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_order_review_heading"><?php esc_html_e( 'Checkout "Total" Label Override', 'wcasc' ); ?></label></th>
+								<td><input type="text" class="regular-text" id="wcasc_order_review_heading" name="wcasc_text[order_review_heading]" value="<?php echo esc_attr( $texts['order_review_heading'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_order_note"><?php esc_html_e( 'Order Note (added after payment)', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {advance_amount}, {due_amount}', 'wcasc' ); ?></small></th>
+								<td><textarea class="large-text" rows="2" id="wcasc_order_note" name="wcasc_text[order_note]"><?php echo esc_textarea( $texts['order_note'] ); ?></textarea></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_customer_advance_line"><?php esc_html_e( 'Customer Order View — Advance Line', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholder: {advance_amount}', 'wcasc' ); ?></small></th>
+								<td><input type="text" class="large-text" id="wcasc_customer_advance_line" name="wcasc_text[customer_advance_line]" value="<?php echo esc_attr( $texts['customer_advance_line'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_customer_due_line"><?php esc_html_e( 'Customer Order View — Due Line', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholder: {due_amount}', 'wcasc' ); ?></small></th>
+								<td><input type="text" class="large-text" id="wcasc_customer_due_line" name="wcasc_text[customer_due_line]" value="<?php echo esc_attr( $texts['customer_due_line'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_admin_advance_label"><?php esc_html_e( 'Admin Order Page — Advance Label', 'wcasc' ); ?></label></th>
+								<td><input type="text" class="regular-text" id="wcasc_admin_advance_label" name="wcasc_text[admin_advance_label]" value="<?php echo esc_attr( $texts['admin_advance_label'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_admin_due_label"><?php esc_html_e( 'Admin Order Page — Due Label', 'wcasc' ); ?></label></th>
+								<td><input type="text" class="regular-text" id="wcasc_admin_due_label" name="wcasc_text[admin_due_label]" value="<?php echo esc_attr( $texts['admin_due_label'] ); ?>" /></td>
+							</tr>
+							<tr>
+								<th><label for="wcasc_column_label"><?php esc_html_e( 'Orders List Column Label', 'wcasc' ); ?></label></th>
+								<td><input type="text" class="regular-text" id="wcasc_column_label" name="wcasc_text[column_label]" value="<?php echo esc_attr( $texts['column_label'] ); ?>" /></td>
+							</tr>
+						</table>
+						<p>
+							<button type="submit" name="wcasc_save_texts" class="button button-primary">
+								<?php esc_html_e( 'Save Texts', 'wcasc' ); ?>
+							</button>
+						</p>
+					</form>
+				</div>
+			</div>
+
+			<aside class="wcasc-sidebar">
+				<div class="wcasc-card">
+					<h3><?php esc_html_e( 'Support & Community', 'wcasc' ); ?></h3>
+					<div class="wcasc-support-list">
+						<a href="https://buymeacoffee.com/ajharrashed" target="_blank" rel="noopener noreferrer">☕ <?php esc_html_e( 'Buy Me a Coffee', 'wcasc' ); ?></a>
+						<a href="https://youtube.com/techtriggerbd" target="_blank" rel="noopener noreferrer">▶ <?php esc_html_e( 'YouTube Channel', 'wcasc' ); ?></a>
+						<a href="https://www.facebook.com/techtriggerr" target="_blank" rel="noopener noreferrer">📘 <?php esc_html_e( 'Facebook Page', 'wcasc' ); ?></a>
+						<a href="https://www.wpmethods.com" target="_blank" rel="noopener noreferrer">🌐 <?php esc_html_e( 'Website', 'wcasc' ); ?></a>
+					</div>
+				</div>
+
+				<div class="wcasc-card">
+					<h3><?php esc_html_e( 'Quick Tips', 'wcasc' ); ?></h3>
+					<ul class="wcasc-tip-list">
+						<li><?php esc_html_e( 'Use By Shipping Method for normal shipping-based advance payments.', 'wcasc' ); ?></li>
+						<li><?php esc_html_e( 'Use By Custom Price for a fixed advance amount.', 'wcasc' ); ?></li>
+						<li><?php esc_html_e( 'Use Both to combine shipping cost with a custom amount.', 'wcasc' ); ?></li>
+					</ul>
+				</div>
+			</aside>
+		</div>
 	</div>
 	<?php
 }
