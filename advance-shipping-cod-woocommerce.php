@@ -16,6 +16,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 define( 'WCASC_VERSION', '2.4.0' );
 define( 'WCASC_OPTION_KEY', 'wcasc_selected_shipping_methods' );
 define( 'WCASC_TEXTS_KEY', 'wcasc_texts' );
+define( 'WCASC_ADVANCE_COST_TYPE_KEY', 'wcasc_advance_cost_type' );
+define( 'WCASC_CUSTOM_ADVANCE_PRICE_KEY', 'wcasc_custom_advance_price' );
 
 /* =========================================================
  * 0. Check WooCommerce is active
@@ -53,6 +55,52 @@ function wcasc_get_texts() {
 		$saved = array();
 	}
 	return wp_parse_args( $saved, wcasc_get_default_texts() );
+}
+
+function wcasc_get_advance_cost_type() {
+	$cost_type = get_option( WCASC_ADVANCE_COST_TYPE_KEY, 'shipping_method' );
+	$allowed   = array( 'shipping_method', 'custom_price', 'both' );
+
+	if ( ! in_array( $cost_type, $allowed, true ) ) {
+		return 'shipping_method';
+	}
+
+	return $cost_type;
+}
+
+function wcasc_get_custom_advance_price() {
+	$price = get_option( WCASC_CUSTOM_ADVANCE_PRICE_KEY, '' );
+	if ( ! is_numeric( $price ) ) {
+		return 0;
+	}
+	return (float) $price;
+}
+
+function wcasc_calculate_advance_amount( $shipping_total = 0 ) {
+	$shipping_total = (float) $shipping_total;
+	$custom_price   = wcasc_get_custom_advance_price();
+	$cost_type      = wcasc_get_advance_cost_type();
+
+	switch ( $cost_type ) {
+		case 'custom_price':
+			$advance_amount = $custom_price;
+			break;
+		case 'both':
+			$advance_amount = $shipping_total + $custom_price;
+			break;
+		case 'shipping_method':
+		default:
+			$advance_amount = $shipping_total;
+			break;
+	}
+
+	return max( 0, $advance_amount );
+}
+
+function wcasc_calculate_due_amount( $grand_total, $shipping_total = 0 ) {
+	$grand_total = (float) $grand_total;
+	$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
+	return max( 0, $grand_total - $advance_amount );
 }
 
 /**
@@ -132,7 +180,16 @@ function wcasc_render_settings_page() {
 	/* ---- Save shipping method selection ---- */
 	if ( isset( $_POST['wcasc_save'] ) && check_admin_referer( 'wcasc_save_settings', 'wcasc_nonce' ) ) {
 		$selected = isset( $_POST['wcasc_methods'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['wcasc_methods'] ) ) : array();
+		$advance_cost_type = isset( $_POST['wcasc_advance_cost_type'] ) ? sanitize_key( wp_unslash( $_POST['wcasc_advance_cost_type'] ) ) : 'shipping_method';
+		$custom_advance_price = isset( $_POST['wcasc_custom_advance_price'] ) ? sanitize_text_field( wp_unslash( $_POST['wcasc_custom_advance_price'] ) ) : '';
+
+		if ( ! in_array( $advance_cost_type, array( 'shipping_method', 'custom_price', 'both' ), true ) ) {
+			$advance_cost_type = 'shipping_method';
+		}
+
 		update_option( WCASC_OPTION_KEY, $selected );
+		update_option( WCASC_ADVANCE_COST_TYPE_KEY, $advance_cost_type );
+		update_option( WCASC_CUSTOM_ADVANCE_PRICE_KEY, $custom_advance_price );
 		echo '<div class="updated"><p>' . esc_html__( 'Shipping method settings saved successfully.', 'wcasc' ) . '</p></div>';
 	}
 
@@ -151,9 +208,11 @@ function wcasc_render_settings_page() {
 		echo '<div class="updated"><p>' . esc_html__( 'Text settings saved successfully.', 'wcasc' ) . '</p></div>';
 	}
 
-	$selected = get_option( WCASC_OPTION_KEY, array() );
-	$methods  = wcasc_get_all_shipping_methods();
-	$texts    = wcasc_get_texts();
+	$selected           = get_option( WCASC_OPTION_KEY, array() );
+	$methods            = wcasc_get_all_shipping_methods();
+	$texts              = wcasc_get_texts();
+	$advance_cost_type  = wcasc_get_advance_cost_type();
+	$custom_advance_price = wcasc_get_custom_advance_price();
 	?>
 	<div class="wrap">
 		<h1><?php esc_html_e( 'Advance Shipping COD Settings', 'wcasc' ); ?></h1>
@@ -161,13 +220,40 @@ function wcasc_render_settings_page() {
 			<?php esc_html_e( 'Check the shipping method(s) below that should trigger this feature. When a customer selects one of these methods at checkout, Cash on Delivery (COD) will automatically be hidden — only online payment methods will show, and only the shipping charge will be collected online in advance. The product price will be collected as COD at delivery.', 'wcasc' ); ?>
 		</p>
 
-		<?php if ( empty( $methods ) ) : ?>
-			<div class="notice notice-warning"><p>
-				<?php esc_html_e( 'No shipping methods found. Please set up shipping zones/methods first under WooCommerce → Settings → Shipping.', 'wcasc' ); ?>
-			</p></div>
-		<?php else : ?>
 		<form method="post">
 			<?php wp_nonce_field( 'wcasc_save_settings', 'wcasc_nonce' ); ?>
+
+			<h2><?php esc_html_e( 'Advance Cost Settings', 'wcasc' ); ?></h2>
+			<table class="form-table" style="max-width:900px;">
+				<tr>
+					<th><label for="wcasc_advance_cost_type"><?php esc_html_e( 'Advance Cost Type', 'wcasc' ); ?></label></th>
+					<td>
+						<select id="wcasc_advance_cost_type" name="wcasc_advance_cost_type">
+							<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'By Shipping Method', 'wcasc' ); ?></option>
+							<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'By Custom Price', 'wcasc' ); ?></option>
+							<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both', 'wcasc' ); ?></option>
+						</select>
+						<p class="description">
+							<?php esc_html_e( 'Choose how the advance amount is calculated for orders matching the selected shipping method.', 'wcasc' ); ?>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th><label for="wcasc_custom_advance_price"><?php esc_html_e( 'Custom Advance Price', 'wcasc' ); ?></label></th>
+					<td>
+						<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( $custom_advance_price ); ?>" />
+						<p class="description">
+							<?php esc_html_e( 'Used when Advance Cost Type is set to By Custom Price or Both.', 'wcasc' ); ?>
+						</p>
+					</td>
+				</tr>
+			</table>
+
+			<?php if ( empty( $methods ) ) : ?>
+				<div class="notice notice-warning"><p>
+					<?php esc_html_e( 'No shipping methods found. Please set up shipping zones/methods first under WooCommerce → Settings → Shipping.', 'wcasc' ); ?>
+				</p></div>
+			<?php else : ?>
 			<table class="widefat striped" style="max-width:900px;">
 				<thead>
 					<tr>
@@ -418,14 +504,15 @@ function wcasc_get_notice_html() {
 	if ( WC()->cart && wcasc_is_selected_shipping_chosen() ) {
 		$texts = wcasc_get_texts();
 
-		$shipping_total = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
-		$grand_total    = (float) WC()->cart->get_total( 'edit' );
-		$due_amount     = max( 0, $grand_total - $shipping_total );
+		$shipping_total  = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
+		$grand_total     = (float) WC()->cart->get_total( 'edit' );
+		$advance_amount  = wcasc_calculate_advance_amount( $shipping_total );
+		$due_amount      = wcasc_calculate_due_amount( $grand_total, $shipping_total );
 
 		$message = wcasc_format_text(
 			$texts['notice_message'],
 			array(
-				'shipping_amount' => '<strong style="color:#d39e00;">' . wc_price( $shipping_total ) . '</strong>',
+				'shipping_amount' => '<strong style="color:#d39e00;">' . wc_price( $advance_amount ) . '</strong>',
 				'due_amount'      => '<strong style="color:#d39e00;">' . wc_price( $due_amount ) . '</strong>',
 			)
 		);
@@ -440,7 +527,8 @@ function wcasc_get_notice_html() {
 		echo '</div>';
 
 		echo '<style>';
-		echo '.wcasc-notice::before{ display:none !important; }';
+		echo '.woocommerce-info.wcasc-notice { border: none; }';
+		echo '.woocommerce-info.wcasc-notice::before{ display:none; }';
 		echo '</style>';
 	}
 
@@ -465,10 +553,11 @@ function wcasc_flag_order_for_advance_capture( $order_id, $posted_data, $order )
 
 	$shipping_total = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
 	$grand_total    = (float) $order->get_total();
-	$due_amount     = max( 0, $grand_total - $shipping_total );
+	$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
+	$due_amount     = wcasc_calculate_due_amount( $grand_total, $shipping_total );
 
 	$order->update_meta_data( '_wcasc_is_advance_order', 'yes' );
-	$order->update_meta_data( '_wcasc_advance_amount', $shipping_total );
+	$order->update_meta_data( '_wcasc_advance_amount', $advance_amount );
 	$order->update_meta_data( '_wcasc_due_amount', $due_amount );
 	$order->update_meta_data( '_wcasc_original_total', $grand_total );
 	$order->save();
@@ -637,8 +726,9 @@ add_filter( 'woocommerce_cart_total', 'wcasc_modify_cart_total_display', 10, 1 )
 function wcasc_modify_cart_total_display( $total ) {
 	if ( is_checkout() && wcasc_is_selected_shipping_chosen() && WC()->cart ) {
 		$shipping_total = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
-		if ( $shipping_total > 0 ) {
-			return wc_price( $shipping_total );
+		$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
+		if ( $advance_amount > 0 ) {
+			return wc_price( $advance_amount );
 		}
 	}
 	return $total;
