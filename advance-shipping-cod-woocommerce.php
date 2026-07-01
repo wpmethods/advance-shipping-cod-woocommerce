@@ -42,7 +42,7 @@ function wcasc_get_default_texts() {
 	return array(
 		'notice_heading'        => 'Advance Shipping Payment',
 		'notice_message'        => 'Cash on Delivery is not available for this shipping method. Please pay the shipping charge of {shipping_amount} online now. The remaining product price of {due_amount} will be collected as Cash on Delivery at the time of delivery.',
-		'order_review_heading'  => 'Amount Payable Now (Shipping Charge)',
+		'order_review_heading'  => 'Payable Now',
 		'order_note'            => 'Advance shipping charge of {advance_amount} has been paid online. The product price of {due_amount} must be collected as COD upon delivery.',
 		'customer_advance_line' => 'Shipping charge of {advance_amount} has been paid online in advance.',
 		'customer_due_line'     => 'The product price of {due_amount} must be paid in cash (Cash on Delivery) at the time of delivery.',
@@ -784,13 +784,15 @@ function wcasc_modify_cart_total_display( $total ) {
 }
 
 // Modify the "Total" heading label at checkout.
-add_filter( 'woocommerce_checkout_order_review_heading', 'wcasc_modify_checkout_heading' );
-function wcasc_modify_checkout_heading( $heading ) {
-	if ( wcasc_is_selected_shipping_chosen() ) {
-		$texts = wcasc_get_texts();
-		return esc_html( $texts['order_review_heading'] );
+add_filter( 'gettext', 'wcasc_modify_order_review_heading', 20, 3 );
+function wcasc_modify_order_review_heading( $translated, $original, $domain ) {
+	if ( 'Total' === $original && 'woocommerce' === $domain && is_checkout() ) {
+		if ( wcasc_is_selected_shipping_chosen() ) {
+			$texts = wcasc_get_texts();
+			$translated = esc_html( $texts['order_review_heading'] );
+		}
 	}
-	return $heading;
+	return $translated;
 }
 
 // Also override the total on the "Pay for order" page.
