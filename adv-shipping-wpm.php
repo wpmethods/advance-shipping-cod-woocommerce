@@ -1,11 +1,11 @@
 <?php
 /**
- * Plugin Name: Advance Shipping COD for WooCommerce
+ * Plugin Name: AdvShipping WPM
  * Plugin URI:  https://wpmethods.com
- * Description: Select one or more shipping methods from the admin panel. When a customer selects that shipping method at checkout, Cash on Delivery (COD) is automatically hidden and only the shipping charge is collected online in advance — the product price is collected as COD at the time of delivery.
- * Version:     1.0.0
+ * Description: Collect shipping, fixed or percentage advance payments through online or manual gateways, with the remaining balance due on delivery.
+ * Version:     1.4.4
  * Author:      WP Methods, Ajharul Islam
- * Text Domain: wcasc
+ * Text Domain: advshipping-wpm
  * Requires Plugins: woocommerce
  * Requires at least: 5.2
  * Tested up to: 7.0
@@ -16,11 +16,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WCASC_VERSION', '1.0.0' );
+define( 'WCASC_VERSION', '1.4.4' );
 define( 'WCASC_OPTION_KEY', 'wcasc_selected_shipping_methods' );
 define( 'WCASC_TEXTS_KEY', 'wcasc_texts' );
 define( 'WCASC_ADVANCE_COST_TYPE_KEY', 'wcasc_advance_cost_type' );
 define( 'WCASC_CUSTOM_ADVANCE_PRICE_KEY', 'wcasc_custom_advance_price' );
+require_once __DIR__ . '/includes/checkout-design.php';
 
 /* =========================================================
  * 0. Check WooCommerce is active
@@ -40,13 +41,13 @@ add_action( 'plugins_loaded', function () {
  * ========================================================= */
 function wcasc_get_default_texts() {
 	return array(
-		'notice_heading'        => 'Advance Shipping Payment',
-		'notice_message'        => 'Cash on Delivery is not available for this shipping method. Please pay the shipping charge of {shipping_amount} online now. The remaining product price of {due_amount} will be collected as Cash on Delivery at the time of delivery.',
+		'notice_heading'        => 'Payment Plan',
+		'notice_message'        => 'Pay {advance_amount} now using your preferred payment method. Pay the remaining {due_amount} on delivery.',
 		'order_review_heading'  => 'Payable Now',
-		'order_note'            => 'Advance shipping charge of {advance_amount} has been paid online. The product price of {due_amount} must be collected as COD upon delivery.',
-		'customer_advance_line' => 'Shipping charge of {advance_amount} has been paid online in advance.',
-		'customer_due_line'     => 'The product price of {due_amount} must be paid in cash (Cash on Delivery) at the time of delivery.',
-		'admin_advance_label'   => 'Advance Paid (Shipping)',
+		'order_note'            => 'Advance payment of {advance_amount} confirmed. Collect {due_amount} as COD upon delivery.',
+		'customer_advance_line' => 'Advance payment: {advance_amount}.',
+		'customer_due_line'     => 'Pay {due_amount} on delivery (Cash on Delivery).',
+		'admin_advance_label'   => 'Advance Payment',
 		'admin_due_label'       => 'Due (COD - Collectible on Delivery)',
 		'column_label'          => 'Due (COD)',
 	);
@@ -57,12 +58,27 @@ function wcasc_get_texts() {
 	if ( ! is_array( $saved ) ) {
 		$saved = array();
 	}
-	return wp_parse_args( $saved, wcasc_get_default_texts() );
+	$defaults = wcasc_get_default_texts();
+	// Refresh previously saved default wording while preserving merchant customization.
+	$legacy = array(
+		'notice_heading' => 'Advance Shipping Payment',
+		'notice_message' => 'Cash on Delivery is not available for this shipping method. Please pay the shipping charge of {shipping_amount} online now. The remaining product price of {due_amount} will be collected as Cash on Delivery at the time of delivery.',
+		'order_note' => 'Advance shipping charge of {advance_amount} has been paid online. The product price of {due_amount} must be collected as COD upon delivery.',
+		'customer_advance_line' => 'Shipping charge of {advance_amount} has been paid online in advance.',
+		'customer_due_line' => 'The product price of {due_amount} must be paid in cash (Cash on Delivery) at the time of delivery.',
+		'admin_advance_label' => 'Advance Paid (Shipping)',
+	);
+	foreach ( $legacy as $key => $value ) {
+		if ( isset( $saved[ $key ] ) && $value === $saved[ $key ] ) {
+			$saved[ $key ] = $defaults[ $key ];
+		}
+	}
+	return wp_parse_args( $saved, $defaults );
 }
 
 function wcasc_get_advance_cost_type() {
 	$cost_type = get_option( WCASC_ADVANCE_COST_TYPE_KEY, 'shipping_method' );
-	$allowed   = array( 'shipping_method', 'custom_price', 'both' );
+	$allowed   = array_keys( wcasc_get_payment_modes() );
 
 	if ( ! in_array( $cost_type, $allowed, true ) ) {
 		return 'shipping_method';
@@ -76,33 +92,90 @@ function wcasc_get_custom_advance_price() {
 	if ( ! is_numeric( $price ) ) {
 		return 0;
 	}
-	return (float) $price;
+	return max( 0, (float) $price );
 }
 
-function wcasc_calculate_advance_amount( $shipping_total = 0 ) {
-	$shipping_total = (float) $shipping_total;
-	$custom_price   = wcasc_get_custom_advance_price();
-	$cost_type      = wcasc_get_advance_cost_type();
+function wcasc_get_payment_modes() {
+	return array(
+		'shipping_method' => __( 'Shipping cost only', 'wcasc' ),
+		'percentage' => __( 'Percentage', 'wcasc' ),
+		'custom_price' => __( 'Fixed amount', 'wcasc' ),
+		'both' => __( 'Shipping + fixed amount', 'wcasc' ),
+		'shipping_percentage' => __( 'Shipping + percentage', 'wcasc' ),
+		'combined' => __( 'Shipping + percentage + fixed amount', 'wcasc' ),
+		'full_payment' => __( 'Full Payment', 'wcasc' ),
+	);
+}
 
-	switch ( $cost_type ) {
-		case 'custom_price':
-			$advance_amount = $custom_price;
-			break;
-		case 'both':
-			$advance_amount = $shipping_total + $custom_price;
-			break;
-		case 'shipping_method':
-		default:
-			$advance_amount = $shipping_total;
-			break;
+function wcasc_get_enabled_modes() {
+	$modes = array_values( array_intersect( (array) get_option( 'wcasc_payment_modes', array( wcasc_get_advance_cost_type() ) ), array_keys( wcasc_get_payment_modes() ) ) );
+	return $modes ? $modes : array( wcasc_get_advance_cost_type() );
+}
+
+function wcasc_get_custom_mode_labels() {
+	$saved = get_option( 'wcasc_payment_mode_labels', array() );
+	$labels = array();
+	foreach ( wcasc_get_payment_modes() as $mode => $default ) {
+		$labels[ $mode ] = is_array( $saved ) && isset( $saved[ $mode ] ) && is_string( $saved[ $mode ] ) ? sanitize_text_field( $saved[ $mode ] ) : '';
 	}
+	return $labels;
+}
 
-	return max( 0, $advance_amount );
+function wcasc_get_checkout_mode_labels() {
+	$labels = wcasc_get_payment_modes();
+	$custom = wcasc_get_custom_mode_labels();
+	$percentage = max( 0, min( 100, (float) get_option( 'wcasc_advance_percentage', 20 ) ) );
+	foreach ( $labels as $mode => $label ) {
+		if ( '' !== $custom[ $mode ] ) {
+			$labels[ $mode ] = str_replace( '{percentage}', (string) $percentage, $custom[ $mode ] );
+		} elseif ( in_array( $mode, array( 'percentage', 'shipping_percentage', 'combined' ), true ) ) {
+			$labels[ $mode ] .= ' (' . $percentage . '%)';
+		}
+	}
+	return $labels;
+}
+
+function wcasc_get_chosen_mode() {
+	$modes = wcasc_get_enabled_modes();
+	$chosen = function_exists( 'WC' ) && WC()->session ? WC()->session->get( 'wcasc_payment_mode' ) : '';
+	return in_array( $chosen, $modes, true ) ? $chosen : ( in_array( wcasc_get_advance_cost_type(), $modes, true ) ? wcasc_get_advance_cost_type() : $modes[0] );
+}
+
+/** All sources use the discounted, tax-inclusive total; never collect more than the order. */
+function wcasc_calculate_advance_amount( $shipping_total = 0, $grand_total = null, $mode = null ) {
+	$shipping_total = max( 0, (float) $shipping_total );
+	if ( null === $grand_total ) {
+		$grand_total = function_exists( 'WC' ) && WC()->cart ? wcasc_get_cart_grand_total() : $shipping_total;
+	}
+	$grand_total = max( 0, (float) $grand_total );
+	$mode = null === $mode ? wcasc_get_chosen_mode() : $mode;
+	if ( 'full_payment' === $mode ) {
+		return (float) wc_format_decimal( $grand_total, wc_get_price_decimals() );
+	}
+	$percentage = max( 0, min( 100, (float) get_option( 'wcasc_advance_percentage', 20 ) ) );
+	$base = 'excluding_shipping' === get_option( 'wcasc_percentage_base', 'order_total' ) ? max( 0, $grand_total - $shipping_total ) : $grand_total;
+	$amount = 0;
+	if ( in_array( $mode, array( 'shipping_method', 'both', 'shipping_percentage', 'combined' ), true ) ) {
+		$amount += $shipping_total;
+	}
+	if ( in_array( $mode, array( 'custom_price', 'both', 'combined' ), true ) ) {
+		$amount += wcasc_get_custom_advance_price();
+	}
+	if ( in_array( $mode, array( 'percentage', 'shipping_percentage', 'combined' ), true ) ) {
+		$amount += $base * $percentage / 100;
+	}
+	return (float) wc_format_decimal( min( $grand_total, max( 0, $amount ) ), wc_get_price_decimals() );
+}
+
+function wcasc_get_cart_grand_total() {
+	// Read unfiltered totals to avoid recursion while gateway payment fields are rendered.
+	$totals = WC()->cart->get_totals();
+	return isset( $totals['total'] ) ? (float) $totals['total'] : 0;
 }
 
 function wcasc_calculate_due_amount( $grand_total, $shipping_total = 0 ) {
 	$grand_total = (float) $grand_total;
-	$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
+	$advance_amount = wcasc_calculate_advance_amount( $shipping_total, $grand_total );
 	return max( 0, $grand_total - $advance_amount );
 }
 
@@ -144,6 +217,13 @@ function wcasc_enqueue_admin_assets( $hook_suffix ) {
 	$plugin_url = plugin_dir_url( __FILE__ );
 	wp_enqueue_style( 'wcasc-admin-css', $plugin_url . 'assets/css/wcasc-admin.css', array(), WCASC_VERSION );
 	wp_enqueue_script( 'wcasc-admin-js', $plugin_url . 'assets/js/wcasc-admin.js', array( 'jquery' ), WCASC_VERSION, true );
+	if ( isset( $_GET['tab'] ) && 'design' === $_GET['tab'] ) {
+		wp_enqueue_style( 'wp-color-picker' );
+		wp_enqueue_style( 'wcasc-design-preview', $plugin_url . 'assets/css/wcasc-checkout.css', array(), WCASC_VERSION );
+		wp_enqueue_script( 'wcasc-design-admin', $plugin_url . 'assets/js/wcasc-design-admin.js', array( 'jquery', 'wp-color-picker' ), WCASC_VERSION, true );
+		$editor_settings = wp_enqueue_code_editor( array( 'type' => 'text/css' ) );
+		wp_localize_script( 'wcasc-design-admin', 'wcascDesignEditor', array( 'settings' => $editor_settings ) );
+	}
 }
 
 /**
@@ -186,25 +266,124 @@ function wcasc_get_all_shipping_methods() {
 	return $all;
 }
 
+function wcasc_get_checkout_positions() {
+	return array( 'before_total' => __( 'Above order total (default)', 'wcasc' ), 'subtotal' => __( 'Below subtotal', 'wcasc' ), 'before_payment' => __( 'Above payment methods', 'wcasc' ) );
+}
+
+function wcasc_get_checkout_position() {
+	$position = get_option( 'wcasc_checkout_position', 'before_total' );
+	// Move the previous subtotal placement to the requested default until explicitly saved again.
+	if ( 'subtotal' === $position && ! get_option( 'wcasc_checkout_position_updated', false ) ) {
+		return 'before_total';
+	}
+	return array_key_exists( $position, wcasc_get_checkout_positions() ) ? $position : 'before_total';
+}
+
+function wcasc_render_workflow_settings() {
+	$custom_labels = wcasc_get_custom_mode_labels();
+	?>
+	<tr><th><?php esc_html_e( 'Payment options', 'wcasc' ); ?></th><td>
+		<p class="description wcasc-options-help"><?php esc_html_e( 'Enable the options customers can use. Choose one default from the enabled options.', 'wcasc' ); ?></p>
+		<table class="wcasc-options-table">
+			<thead><tr><th scope="col"><?php esc_html_e( 'Enable', 'wcasc' ); ?></th><th scope="col"><?php esc_html_e( 'Advance payment', 'wcasc' ); ?></th><th scope="col"><?php esc_html_e( 'Checkout label', 'wcasc' ); ?></th><th scope="col"><?php esc_html_e( 'Default', 'wcasc' ); ?></th></tr></thead>
+			<tbody><?php foreach ( wcasc_get_payment_modes() as $mode => $label ) : ?>
+			<tr>
+				<td><input type="checkbox" id="wcasc-enable-<?php echo esc_attr( $mode ); ?>" name="wcasc_payment_modes[]" value="<?php echo esc_attr( $mode ); ?>" <?php checked( in_array( $mode, wcasc_get_enabled_modes(), true ) ); ?> aria-label="<?php echo esc_attr( sprintf( __( 'Enable %s', 'wcasc' ), $label ) ); ?>" /></td>
+				<td><label for="wcasc-enable-<?php echo esc_attr( $mode ); ?>"><?php echo esc_html( $label ); ?></label></td>
+				<td><input class="wcasc-mode-label" type="text" name="wcasc_mode_labels[<?php echo esc_attr( $mode ); ?>]" value="<?php echo esc_attr( $custom_labels[ $mode ] ); ?>" placeholder="<?php echo esc_attr( $label ); ?>" maxlength="120" aria-label="<?php echo esc_attr( sprintf( __( 'Checkout label for %s', 'wcasc' ), $label ) ); ?>" /></td>
+				<td><input type="radio" name="wcasc_advance_cost_type" value="<?php echo esc_attr( $mode ); ?>" <?php checked( wcasc_get_advance_cost_type(), $mode ); ?> aria-label="<?php echo esc_attr( sprintf( __( 'Use %s as default', 'wcasc' ), $label ) ); ?>" /></td>
+			</tr>
+			<?php endforeach; ?></tbody>
+		</table>
+		<p class="description" id="wcasc-choice-help"><?php esc_html_e( 'One enabled option: applied automatically. Multiple enabled options: customers choose at checkout.', 'wcasc' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Rename options using Checkout label. Leave blank for the original name. Use {percentage}% to show the configured percentage in your label.', 'wcasc' ); ?></p>
+	</td></tr>
+	<tr class="wcasc-fixed-setting"><th><label for="wcasc_custom_advance_price"><?php esc_html_e( 'Fixed advance amount', 'wcasc' ); ?></label></th><td>
+		<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( wcasc_get_custom_advance_price() ); ?>" />
+		<p class="description"><?php esc_html_e( 'Amount in your store currency. Added to shipping when a combined option is enabled.', 'wcasc' ); ?></p>
+	</td></tr>
+	<tr class="wcasc-percentage-setting">
+		<th><label for="wcasc_advance_percentage"><?php esc_html_e( 'Advance percentage', 'wcasc' ); ?></label></th>
+		<td>
+				<div class="wcasc-input-suffix"><input id="wcasc_advance_percentage" name="wcasc_advance_percentage" type="number" min="0" max="100" step="0.01" value="<?php echo esc_attr( get_option( 'wcasc_advance_percentage', 20 ) ); ?>" /><span aria-hidden="true">%</span></div>
+				<p class="description"><?php esc_html_e( 'Percentage collected in advance. Combined options add shipping or a fixed amount. The advance cannot exceed the order total.', 'wcasc' ); ?></p>
+		</td>
+	</tr>
+	<tr>
+		<th><label for="wcasc_checkout_position"><?php esc_html_e( 'Checkout position', 'wcasc' ); ?></label></th>
+		<td>
+				<select id="wcasc_checkout_position" name="wcasc_checkout_position">
+				<?php foreach ( wcasc_get_checkout_positions() as $position => $label ) : ?>
+				<option value="<?php echo esc_attr( $position ); ?>" <?php selected( wcasc_get_checkout_position(), $position ); ?>><?php echo esc_html( $label ); ?></option>
+				<?php endforeach; ?>
+				</select>
+				<p class="description"><?php esc_html_e( 'Uses the classic WooCommerce checkout, including compatible CartFlows checkout templates.', 'wcasc' ); ?></p>
+		</td>
+	</tr>
+	<tr class="wcasc-percentage-setting"><th><label for="wcasc_percentage_base"><?php esc_html_e( 'Calculate percentage of', 'wcasc' ); ?></label></th><td>
+		<select id="wcasc_percentage_base" name="wcasc_percentage_base">
+			<option value="order_total" <?php selected( get_option( 'wcasc_percentage_base', 'order_total' ), 'order_total' ); ?>><?php esc_html_e( 'Full order total after discounts, including tax and fees', 'wcasc' ); ?></option>
+			<option value="excluding_shipping" <?php selected( get_option( 'wcasc_percentage_base', 'order_total' ), 'excluding_shipping' ); ?>><?php esc_html_e( 'Order total excluding shipping and shipping tax', 'wcasc' ); ?></option>
+		</select>
+	</td></tr>
+	<tr><th><?php esc_html_e( 'Cash on Delivery', 'wcasc' ); ?></th><td>
+		<label><input type="checkbox" name="wcasc_show_cod" value="yes" <?php checked( wcasc_should_show_cod() ); ?> /> <?php esc_html_e( 'Allow full payment on delivery', 'wcasc' ); ?></label>
+		<p class="description"><?php esc_html_e( 'Show COD alongside advance payment gateways. Customers choosing COD pay the full order amount on delivery, with no advance. COD must be enabled and available in WooCommerce payment settings.', 'wcasc' ); ?></p>
+	</td></tr>
+	<tr><th><?php esc_html_e( 'Advance payment gateways', 'wcasc' ); ?></th><td><fieldset>
+		<?php foreach ( WC()->payment_gateways()->payment_gateways() as $id => $gateway ) : if ( 'cod' === $id ) { continue; } ?>
+		<label style="display:block;margin-bottom:8px"><input type="checkbox" name="wcasc_gateways[]" value="<?php echo esc_attr( $id ); ?>" <?php checked( in_array( $id, (array) get_option( 'wcasc_gateways', array() ), true ) ); ?> /> <?php echo esc_html( $gateway->get_title() ); ?> <code><?php echo esc_html( $id ); ?></code></label>
+		<?php endforeach; ?>
+		<p class="description"><?php esc_html_e( 'Leave all unchecked to allow every enabled non-COD gateway. Select several to offer multiple payment methods. Gateway availability rules still apply.', 'wcasc' ); ?></p>
+	</fieldset></td></tr>
+	<?php
+}
+
 function wcasc_render_settings_page() {
 	if ( ! current_user_can( 'manage_woocommerce' ) ) {
 		return;
 	}
+	$design_notice = wcasc_handle_design_save();
+	$save_notices = $design_notice ? array( $design_notice ) : array();
+	$active_tab = isset( $_GET['tab'] ) && 'design' === $_GET['tab'] ? 'design' : 'settings';
 
 	/* ---- Save shipping method selection ---- */
 	if ( isset( $_POST['wcasc_save'] ) && check_admin_referer( 'wcasc_save_settings', 'wcasc_nonce' ) ) {
-		$selected = isset( $_POST['wcasc_methods'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['wcasc_methods'] ) ) : array();
+		$selected = isset( $_POST['wcasc_methods'] ) && is_array( $_POST['wcasc_methods'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['wcasc_methods'] ) ) : array();
 		$advance_cost_type = isset( $_POST['wcasc_advance_cost_type'] ) ? sanitize_key( wp_unslash( $_POST['wcasc_advance_cost_type'] ) ) : 'shipping_method';
 		$custom_advance_price = isset( $_POST['wcasc_custom_advance_price'] ) ? sanitize_text_field( wp_unslash( $_POST['wcasc_custom_advance_price'] ) ) : '';
 
-		if ( ! in_array( $advance_cost_type, array( 'shipping_method', 'custom_price', 'both' ), true ) ) {
+		if ( ! array_key_exists( $advance_cost_type, wcasc_get_payment_modes() ) ) {
 			$advance_cost_type = 'shipping_method';
 		}
 
 		update_option( WCASC_OPTION_KEY, $selected );
+		update_option( WCASC_CUSTOM_ADVANCE_PRICE_KEY, max( 0, (float) wc_format_decimal( $custom_advance_price ) ) );
+		$modes = isset( $_POST['wcasc_payment_modes'] ) && is_array( $_POST['wcasc_payment_modes'] ) ? array_intersect( array_map( 'sanitize_key', wp_unslash( $_POST['wcasc_payment_modes'] ) ), array_keys( wcasc_get_payment_modes() ) ) : array();
+		if ( ! $modes ) {
+			$modes = array( $advance_cost_type );
+		} elseif ( ! in_array( $advance_cost_type, $modes, true ) ) {
+			$advance_cost_type = reset( $modes );
+		}
 		update_option( WCASC_ADVANCE_COST_TYPE_KEY, $advance_cost_type );
-		update_option( WCASC_CUSTOM_ADVANCE_PRICE_KEY, $custom_advance_price );
-		echo '<div class="updated"><p>' . esc_html__( 'Shipping method and advance cost settings saved successfully.', 'wcasc' ) . '</p></div>';
+		update_option( 'wcasc_payment_modes', array_values( array_unique( $modes ) ) );
+		if ( isset( $_POST['wcasc_mode_labels'] ) && is_array( $_POST['wcasc_mode_labels'] ) ) {
+			$posted_labels = wp_unslash( $_POST['wcasc_mode_labels'] );
+			$mode_labels = array();
+			foreach ( wcasc_get_payment_modes() as $mode => $label ) {
+				$mode_labels[ $mode ] = isset( $posted_labels[ $mode ] ) && is_string( $posted_labels[ $mode ] ) ? sanitize_text_field( $posted_labels[ $mode ] ) : '';
+			}
+			update_option( 'wcasc_payment_mode_labels', $mode_labels );
+		}
+		update_option( 'wcasc_advance_percentage', isset( $_POST['wcasc_advance_percentage'] ) ? max( 0, min( 100, (float) wc_format_decimal( wp_unslash( $_POST['wcasc_advance_percentage'] ) ) ) ) : 20 );
+		update_option( 'wcasc_percentage_base', isset( $_POST['wcasc_percentage_base'] ) && 'excluding_shipping' === $_POST['wcasc_percentage_base'] ? 'excluding_shipping' : 'order_total' );
+		$position = isset( $_POST['wcasc_checkout_position'] ) ? sanitize_key( wp_unslash( $_POST['wcasc_checkout_position'] ) ) : 'before_total';
+		update_option( 'wcasc_checkout_position', array_key_exists( $position, wcasc_get_checkout_positions() ) ? $position : 'before_total' );
+		update_option( 'wcasc_checkout_position_updated', true );
+		$gateway_ids = isset( $_POST['wcasc_gateways'] ) && is_array( $_POST['wcasc_gateways'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['wcasc_gateways'] ) ) : array();
+		update_option( 'wcasc_gateways', array_values( array_diff( $gateway_ids, array( 'cod' ) ) ) );
+		update_option( 'wcasc_show_cod', isset( $_POST['wcasc_show_cod'] ) && 'yes' === $_POST['wcasc_show_cod'] ? 'yes' : 'no' );
+		$save_notices[] = __( 'Shipping method and advance cost settings saved successfully.', 'wcasc' );
 	}
 
 	/* ---- Save customizable texts ---- */
@@ -219,14 +398,12 @@ function wcasc_render_settings_page() {
 			}
 		}
 		update_option( WCASC_TEXTS_KEY, $texts );
-		echo '<div class="updated"><p>' . esc_html__( 'Text settings saved successfully.', 'wcasc' ) . '</p></div>';
+		$save_notices[] = __( 'Text settings saved successfully.', 'wcasc' );
 	}
 
 	$selected            = get_option( WCASC_OPTION_KEY, array() );
 	$methods             = wcasc_get_all_shipping_methods();
 	$texts               = wcasc_get_texts();
-	$advance_cost_type   = wcasc_get_advance_cost_type();
-	$custom_advance_price = wcasc_get_custom_advance_price();
 	?>
 	<div class="wrap wcasc-settings-wrap">
 		<div class="wcasc-hero">
@@ -236,6 +413,14 @@ function wcasc_render_settings_page() {
 			</p>
 		</div>
 
+		<?php foreach ( $save_notices as $message ) : ?>
+		<div class="wcasc-save-notice" role="status"><p><?php echo esc_html( $message ); ?></p></div>
+		<?php endforeach; ?>
+		<nav class="nav-tab-wrapper wcasc-settings-tabs" aria-label="<?php esc_attr_e( 'Plugin settings', 'wcasc' ); ?>">
+			<a class="nav-tab <?php echo 'settings' === $active_tab ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=wcasc-settings' ) ); ?>"><?php esc_html_e( 'Payment Settings', 'wcasc' ); ?></a>
+			<a class="nav-tab <?php echo 'design' === $active_tab ? 'nav-tab-active' : ''; ?>" href="<?php echo esc_url( admin_url( 'admin.php?page=wcasc-settings&tab=design' ) ); ?>"><?php esc_html_e( 'Checkout Design', 'wcasc' ); ?></a>
+		</nav>
+		<?php if ( 'design' === $active_tab ) : wcasc_render_checkout_design_tab(); else : ?>
 		<div class="wcasc-settings-grid">
 			<div class="wcasc-main-column">
 				<div class="wcasc-card">
@@ -243,28 +428,7 @@ function wcasc_render_settings_page() {
 					<form method="post">
 						<?php wp_nonce_field( 'wcasc_save_settings', 'wcasc_nonce' ); ?>
 						<table class="form-table" style="max-width:900px;">
-							<tr>
-								<th><label for="wcasc_advance_cost_type"><?php esc_html_e( 'Advance Cost Type', 'wcasc' ); ?></label></th>
-								<td>
-									<select id="wcasc_advance_cost_type" name="wcasc_advance_cost_type">
-										<option value="shipping_method" <?php selected( $advance_cost_type, 'shipping_method' ); ?>><?php esc_html_e( 'Shipping method price', 'wcasc' ); ?></option>
-										<option value="custom_price" <?php selected( $advance_cost_type, 'custom_price' ); ?>><?php esc_html_e( 'Custom price', 'wcasc' ); ?></option>
-										<option value="both" <?php selected( $advance_cost_type, 'both' ); ?>><?php esc_html_e( 'Both (Shipping price + Custom price)', 'wcasc' ); ?></option>
-									</select>
-									<p class="description">
-										<?php esc_html_e( 'Choose how the advance amount is calculated for matching shipping methods.', 'wcasc' ); ?>
-									</p>
-								</td>
-							</tr>
-							<tr class="wcasc-custom-price-row">
-								<th><label for="wcasc_custom_advance_price"><?php esc_html_e( 'Custom Advance Price', 'wcasc' ); ?></label></th>
-								<td>
-									<input type="number" step="0.01" min="0" class="regular-text" id="wcasc_custom_advance_price" name="wcasc_custom_advance_price" value="<?php echo esc_attr( $custom_advance_price ); ?>" />
-									<p class="description">
-										<?php esc_html_e( 'Used when the advance type is set to By Custom Price or Both.', 'wcasc' ); ?>
-									</p>
-								</td>
-							</tr>
+							<?php wcasc_render_workflow_settings(); ?>
 						</table>
 
 						<div class="wcasc-card">
@@ -320,7 +484,10 @@ function wcasc_render_settings_page() {
 					</form>
 				</div>
 
-				<div class="wcasc-card">
+			</div>
+
+			<aside class="wcasc-sidebar">
+				<div class="wcasc-card wcasc-texts-card">
 					<h2><?php esc_html_e( 'Customize Texts', 'wcasc' ); ?></h2>
 					<p class="description" style="margin-top:0;">
 						<?php esc_html_e( 'Edit the customer-facing messages from checkout to order confirmation.', 'wcasc' ); ?>
@@ -333,7 +500,7 @@ function wcasc_render_settings_page() {
 								<td><input type="text" class="regular-text" id="wcasc_notice_heading" name="wcasc_text[notice_heading]" value="<?php echo esc_attr( $texts['notice_heading'] ); ?>" /></td>
 							</tr>
 							<tr>
-								<th><label for="wcasc_notice_message"><?php esc_html_e( 'Checkout Notice Message', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {shipping_amount}, {due_amount}', 'wcasc' ); ?></small></th>
+								<th><label for="wcasc_notice_message"><?php esc_html_e( 'Checkout Notice Message', 'wcasc' ); ?></label><br /><small><?php esc_html_e( 'Placeholders: {advance_amount}, {shipping_amount}, {due_amount}', 'wcasc' ); ?></small></th>
 								<td><textarea class="large-text" rows="3" id="wcasc_notice_message" name="wcasc_text[notice_message]"><?php echo esc_textarea( $texts['notice_message'] ); ?></textarea></td>
 							</tr>
 							<tr>
@@ -372,9 +539,6 @@ function wcasc_render_settings_page() {
 						</p>
 					</form>
 				</div>
-			</div>
-
-			<aside class="wcasc-sidebar">
 				<div class="wcasc-card">
 					<h3><?php esc_html_e( 'Support & Community', 'wcasc' ); ?></h3>
 					<div class="wcasc-support-list">
@@ -395,6 +559,7 @@ function wcasc_render_settings_page() {
 				</div>
 			</aside>
 		</div>
+		<?php endif; ?>
 	</div>
 	<?php
 }
@@ -504,202 +669,51 @@ function wcasc_order_uses_selected_shipping( $order ) {
  * 4. Hide COD when selected shipping method is chosen
  * ========================================================= */
 add_filter( 'woocommerce_available_payment_gateways', 'wcasc_hide_cod_when_selected_shipping' );
+function wcasc_should_show_cod() {
+	return 'yes' === get_option( 'wcasc_show_cod', 'no' );
+}
+
+function wcasc_is_cod_checkout_selected() {
+	return wcasc_should_show_cod() && ! is_checkout_pay_page() && WC()->session && 'cod' === WC()->session->get( 'chosen_payment_method' );
+}
+
 function wcasc_hide_cod_when_selected_shipping( $gateways ) {
 	if ( is_admin() && ! wp_doing_ajax() ) {
 		return $gateways;
 	}
-	if ( wcasc_is_selected_shipping_chosen() && isset( $gateways['cod'] ) ) {
-		unset( $gateways['cod'] );
+	$advance_order = false;
+	if ( is_checkout_pay_page() ) {
+		$order = wc_get_order( absint( get_query_var( 'order-pay' ) ) );
+		$advance_order = $order && 'yes' === $order->get_meta( '_wcasc_is_advance_order' );
+		if ( ! $advance_order ) {
+			return $gateways;
+		}
+	}
+	if ( $advance_order || ( is_checkout() && WC()->cart && wcasc_is_selected_shipping_chosen() ) ) {
+		if ( ! $advance_order ) {
+			$shipping = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
+			if ( wcasc_calculate_advance_amount( $shipping, wcasc_get_cart_grand_total() ) <= 0 ) {
+				return isset( $gateways['cod'] ) ? array( 'cod' => $gateways['cod'] ) : array();
+			}
+		}
+		$show_cod = ! $advance_order && wcasc_should_show_cod();
+		if ( ! $show_cod ) {
+			unset( $gateways['cod'] );
+		}
+		$allowed = (array) get_option( 'wcasc_gateways', array() );
+		if ( $allowed ) {
+			if ( $show_cod ) {
+				$allowed[] = 'cod';
+			}
+			$gateways = array_intersect_key( $gateways, array_flip( $allowed ) );
+		}
 	}
 	return $gateways;
 }
 
-/* =========================================================
- * 5. Show notice to customer before payment methods
- *    (only when COD is actually being hidden)
- *
- *    IMPORTANT: WooCommerce's checkout AJAX (triggered when the customer
- *    changes the shipping method) replaces DOM content by matching the
- *    ".woocommerce-checkout-review-order-table" selector only. Content
- *    that sits AFTER the table (like this notice) gets left behind as a
- *    stray, un-replaced duplicate — so it never updates dynamically and
- *    only reflects the correct state after a full page reload.
- *
- *    Fix: wrap the notice in its own element with a stable ID, and
- *    explicitly register that ID in 'woocommerce_update_order_review_fragments'
- *    so WooCommerce's own AJAX fragment-replace mechanism refreshes it
- *    directly on every shipping method change — same as any other core
- *    checkout fragment.
- * ========================================================= */
-add_action( 'woocommerce_review_order_before_payment', 'wcasc_render_notice_wrapper' );
-function wcasc_render_notice_wrapper() {
-	echo wcasc_get_notice_html(); // phpcs:ignore WordPress.Security.EscapeOutput -- already built with esc_html()/wp_kses_post() internally.
-}
+require_once __DIR__ . '/includes/checkout.php';
 
-add_filter( 'woocommerce_update_order_review_fragments', 'wcasc_add_notice_fragment' );
-function wcasc_add_notice_fragment( $fragments ) {
-	$fragments['#wcasc-notice-wrap'] = wcasc_get_notice_html();
-	return $fragments;
-}
-
-/**
- * Build the notice markup, always wrapped in a stable-ID container
- * (even when empty) so AJAX fragment replacement always finds it.
- */
-function wcasc_get_notice_html() {
-	ob_start();
-	echo '<div id="wcasc-notice-wrap">';
-
-	if ( WC()->cart && wcasc_is_selected_shipping_chosen() ) {
-		$texts = wcasc_get_texts();
-
-		$shipping_total  = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
-		$grand_total     = (float) WC()->cart->get_total( 'edit' );
-		$advance_amount  = wcasc_calculate_advance_amount( $shipping_total );
-		$due_amount      = wcasc_calculate_due_amount( $grand_total, $shipping_total );
-
-		$message = wcasc_format_text(
-			$texts['notice_message'],
-			array(
-				'shipping_amount' => '<strong style="color:#d39e00;">' . wc_price( $advance_amount ) . '</strong>',
-				'due_amount'      => '<strong style="color:#d39e00;">' . wc_price( $due_amount ) . '</strong>',
-			)
-		);
-
-		echo '<div class="woocommerce-info wcasc-notice" style="margin-bottom:20px;padding:15px 20px;background:#fff3cd;border-left:5px solid #ffc107;border-radius:4px;">';
-		echo '<p style="margin:0 0 5px 0;font-weight:600;color:#856404;font-size:16px;">';
-		echo '&#128230; ' . esc_html( $texts['notice_heading'] );
-		echo '</p>';
-		echo '<p style="margin:0;color:#533f03;font-size:14px;">';
-		echo wp_kses_post( $message );
-		echo '</p>';
-		echo '</div>';
-
-		echo '<style>';
-		echo '.woocommerce-info.wcasc-notice { border: none; }';
-		echo '.woocommerce-info.wcasc-notice::before{ display:none; }';
-		echo '</style>';
-	}
-
-	echo '</div>';
-	return ob_get_clean();
-}
-
-/* =========================================================
- * 6. Set an advance total for the payment gateway
- *    (shows only the shipping charge, not the full total)
- * ========================================================= */
-
-// 6.1: On order creation, save meta and update the order total.
-add_action( 'woocommerce_checkout_order_processed', 'wcasc_flag_order_for_advance_capture', 5, 3 );
-function wcasc_flag_order_for_advance_capture( $order_id, $posted_data, $order ) {
-	if ( ! $order ) {
-		$order = wc_get_order( $order_id );
-	}
-	if ( ! $order || ! wcasc_order_uses_selected_shipping( $order ) ) {
-		return;
-	}
-
-	$shipping_total = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
-	$grand_total    = (float) $order->get_total();
-	$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
-	$due_amount     = wcasc_calculate_due_amount( $grand_total, $shipping_total );
-
-	$order->update_meta_data( '_wcasc_is_advance_order', 'yes' );
-	$order->update_meta_data( '_wcasc_advance_amount', $advance_amount );
-	$order->update_meta_data( '_wcasc_due_amount', $due_amount );
-	$order->update_meta_data( '_wcasc_original_total', $grand_total );
-	$order->save();
-
-	// Update the order total for the payment gateway.
-	$order->set_total( $shipping_total );
-	$order->save();
-}
-
-// 6.2: Override the total right before the payment gateway processes it.
-add_filter( 'woocommerce_order_get_total', 'wcasc_override_total_for_payment_gateway', 1, 2 );
-function wcasc_override_total_for_payment_gateway( $total, $order ) {
-	if ( ! $order instanceof WC_Order ) {
-		return $total;
-	}
-
-	if ( 'yes' === $order->get_meta( '_wcasc_is_advance_order' ) ) {
-		$status = $order->get_status();
-		if ( in_array( $status, array( 'pending', 'failed' ), true ) ) {
-			$advance = $order->get_meta( '_wcasc_advance_amount' );
-			if ( '' !== $advance && null !== $advance && (float) $advance > 0 ) {
-				return (float) $advance;
-			}
-		}
-	}
-
-	return $total;
-}
-
-// 6.3: Restore the original total once payment succeeds.
-add_action( 'woocommerce_order_status_changed', 'wcasc_restore_original_total_after_payment', 10, 4 );
-function wcasc_restore_original_total_after_payment( $order_id, $from_status, $to_status, $order ) {
-	if ( ! $order ) {
-		$order = wc_get_order( $order_id );
-	}
-	if ( ! $order || 'yes' !== $order->get_meta( '_wcasc_is_advance_order' ) ) {
-		return;
-	}
-
-	if ( in_array( $to_status, array( 'processing', 'completed', 'on-hold' ), true ) ) {
-		$original_total = $order->get_meta( '_wcasc_original_total' );
-		if ( '' !== $original_total && null !== $original_total ) {
-			$order->set_total( (float) $original_total );
-			$order->save();
-		}
-	}
-}
-
-/* =========================================================
- * 7. Add order note once payment succeeds
- * ========================================================= */
-add_action( 'woocommerce_order_status_changed', 'wcasc_add_order_note_on_payment', 20, 4 );
-function wcasc_add_order_note_on_payment( $order_id, $from_status, $to_status, $order ) {
-	if ( ! $order ) {
-		$order = wc_get_order( $order_id );
-	}
-	if ( ! $order || 'yes' !== $order->get_meta( '_wcasc_is_advance_order' ) ) {
-		return;
-	}
-	if ( 'yes' === $order->get_meta( '_wcasc_note_added' ) ) {
-		return;
-	}
-	if ( in_array( $to_status, array( 'processing', 'completed', 'on-hold' ), true ) ) {
-		$texts = wcasc_get_texts();
-		$note  = wcasc_format_text(
-			$texts['order_note'],
-			array(
-				'advance_amount' => wc_price( $order->get_meta( '_wcasc_advance_amount' ), array( 'currency' => $order->get_currency() ) ),
-				'due_amount'     => wc_price( $order->get_meta( '_wcasc_due_amount' ), array( 'currency' => $order->get_currency() ) ),
-			)
-		);
-		$order->add_order_note( wp_strip_all_tags( $note ) );
-		$order->update_meta_data( '_wcasc_note_added', 'yes' );
-		$order->save();
-	}
-}
-
-/* =========================================================
- * 8. Show Advance / Due info on the admin order page
- * ========================================================= */
-add_action( 'woocommerce_admin_order_data_after_order_details', 'wcasc_admin_order_advance_info' );
-function wcasc_admin_order_advance_info( $order ) {
-	if ( ! $order instanceof WC_Order || 'yes' !== $order->get_meta( '_wcasc_is_advance_order' ) ) {
-		return;
-	}
-	$texts   = wcasc_get_texts();
-	$advance = wc_price( $order->get_meta( '_wcasc_advance_amount' ), array( 'currency' => $order->get_currency() ) );
-	$due     = wc_price( $order->get_meta( '_wcasc_due_amount' ), array( 'currency' => $order->get_currency() ) );
-	echo '<div class="wcasc-admin-box" style="margin-top:10px;padding:10px;background:#fff8e1;border:1px solid #ffe082;border-radius:4px;">';
-	echo '<p style="margin:4px 0;"><strong>' . esc_html( $texts['admin_advance_label'] ) . ':</strong> ' . wp_kses_post( $advance ) . '</p>';
-	echo '<p style="margin:4px 0;"><strong>' . esc_html( $texts['admin_due_label'] ) . ':</strong> ' . wp_kses_post( $due ) . '</p>';
-	echo '</div>';
-}
+require_once __DIR__ . '/includes/order-payments.php';
 
 /* =========================================================
  * 9. Show Advance / Due info on customer order view & emails
@@ -712,13 +726,20 @@ function wcasc_customer_order_advance_info( $order ) {
 	}
 	$texts   = wcasc_get_texts();
 	$advance = wc_price( $order->get_meta( '_wcasc_advance_amount' ), array( 'currency' => $order->get_currency() ) );
-	$due     = wc_price( $order->get_meta( '_wcasc_due_amount' ), array( 'currency' => $order->get_currency() ) );
+	$due     = wc_price( wcasc_get_outstanding_due( $order ), array( 'currency' => $order->get_currency() ) );
 
 	$advance_line = wcasc_format_text( $texts['customer_advance_line'], array( 'advance_amount' => $advance ) );
 	$due_line     = wcasc_format_text( $texts['customer_due_line'], array( 'due_amount' => $due ) );
+	if ( wcasc_get_outstanding_due( $order ) <= 0 ) {
+		$due_line = (float) $order->get_meta( '_wcasc_due_amount' ) <= 0 ? __( 'No payment is due on delivery.', 'wcasc' ) : __( 'Delivery balance fully collected.', 'wcasc' );
+	}
 
-	echo '<div style="margin:15px 0;padding:12px;background:#fff8e1;border:1px solid #ffe082;">';
+	echo '<div style="margin:15px 0;padding:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;">';
+	echo '<p>' . esc_html( wcasc_get_advance_status_label( $order ) ) . '</p>';
 	echo '<p style="margin:4px 0;">' . wp_kses_post( $advance_line ) . '</p>';
+	if ( wcasc_get_due_collected( $order ) > 0 ) {
+		echo '<p>' . esc_html__( 'Delivery payments collected:', 'wcasc' ) . ' ' . wp_kses_post( wc_price( wcasc_get_due_collected( $order ), array( 'currency' => $order->get_currency() ) ) ) . '</p>';
+	}
 	echo '<p style="margin:4px 0;">' . wp_kses_post( $due_line ) . '</p>';
 	echo '</div>';
 }
@@ -726,12 +747,22 @@ function wcasc_customer_order_advance_info( $order ) {
 /* =========================================================
  * 10. Add "Due (COD)" column to the orders list (Classic + HPOS)
  * ========================================================= */
-add_filter( 'manage_edit-shop_order_columns', 'wcasc_add_due_column' );
-add_filter( 'manage_woocommerce_page_wc-orders_columns', 'wcasc_add_due_column' );
+add_filter( 'manage_edit-shop_order_columns', 'wcasc_add_due_column', 999 );
+add_filter( 'manage_woocommerce_page_wc-orders_columns', 'wcasc_add_due_column', 999 );
 function wcasc_add_due_column( $columns ) {
-	$texts                 = wcasc_get_texts();
-	$columns['wcasc_due'] = esc_html( $texts['column_label'] );
-	return $columns;
+	$texts = wcasc_get_texts();
+	unset( $columns['wcasc_due'] );
+	$ordered = array();
+	foreach ( $columns as $key => $label ) {
+		$ordered[ $key ] = $label;
+		if ( 'order_status' === $key ) {
+			$ordered['wcasc_due'] = esc_html( $texts['column_label'] );
+		}
+	}
+	if ( ! isset( $ordered['wcasc_due'] ) ) {
+		$ordered['wcasc_due'] = esc_html( $texts['column_label'] );
+	}
+	return $ordered;
 }
 
 add_action( 'manage_shop_order_posts_custom_column', 'wcasc_render_due_column', 10, 2 );
@@ -745,7 +776,12 @@ function wcasc_render_due_column( $column, $order_or_id ) {
 		echo '&mdash;';
 		return;
 	}
-	echo wp_kses_post( wc_price( $order->get_meta( '_wcasc_due_amount' ), array( 'currency' => $order->get_currency() ) ) );
+	$due = wcasc_get_outstanding_due( $order );
+	if ( $due > 0 ) {
+		echo '<span class="wcasc-due-badge" aria-label="' . esc_attr( sprintf( __( 'Outstanding due: %s', 'wcasc' ), wp_strip_all_tags( wc_price( $due, array( 'currency' => $order->get_currency() ) ) ) ) ) . '">' . wp_kses_post( wc_price( $due, array( 'currency' => $order->get_currency() ) ) ) . '</span>';
+	} else {
+		echo '<span class="wcasc-due-clear">' . wp_kses_post( wc_price( 0, array( 'currency' => $order->get_currency() ) ) ) . '</span>';
+	}
 }
 
 /* =========================================================
@@ -754,6 +790,7 @@ function wcasc_render_due_column( $column, $order_or_id ) {
 add_action( 'before_woocommerce_init', function () {
 	if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
 		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
+		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, false );
 	}
 } );
 
@@ -767,13 +804,13 @@ add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), function ( $li
 } );
 
 /* =========================================================
- * 13. Show only the shipping charge as the checkout total
+ * 13. Display the advance amount as the checkout total
  * ========================================================= */
 
 // Modify displayed cart total on checkout.
 add_filter( 'woocommerce_cart_total', 'wcasc_modify_cart_total_display', 10, 1 );
 function wcasc_modify_cart_total_display( $total ) {
-	if ( is_checkout() && wcasc_is_selected_shipping_chosen() && WC()->cart ) {
+	if ( is_checkout() && ! is_order_received_page() && ! is_checkout_pay_page() && ! wcasc_is_cod_checkout_selected() && wcasc_is_selected_shipping_chosen() && WC()->cart ) {
 		$shipping_total = (float) WC()->cart->get_shipping_total() + (float) WC()->cart->get_shipping_tax();
 		$advance_amount = wcasc_calculate_advance_amount( $shipping_total );
 		if ( $advance_amount > 0 ) {
@@ -786,8 +823,8 @@ function wcasc_modify_cart_total_display( $total ) {
 // Modify the "Total" heading label at checkout.
 add_filter( 'gettext', 'wcasc_modify_order_review_heading', 20, 3 );
 function wcasc_modify_order_review_heading( $translated, $original, $domain ) {
-	if ( 'Total' === $original && 'woocommerce' === $domain && is_checkout() ) {
-		if ( wcasc_is_selected_shipping_chosen() ) {
+	if ( 'Total' === $original && 'woocommerce' === $domain && is_checkout() && ! is_order_received_page() && ! is_checkout_pay_page() ) {
+		if ( ! wcasc_is_cod_checkout_selected() && wcasc_is_selected_shipping_chosen() ) {
 			$texts = wcasc_get_texts();
 			$translated = esc_html( $texts['order_review_heading'] );
 		}
