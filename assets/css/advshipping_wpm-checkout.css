@@ -1,0 +1,22 @@
+.advshipping_wpm-summary-row > td { padding: 0 !important; text-align: left !important; }
+.advshipping_wpm-gateway-cost { display: inline-block; margin-inline-start: 8px; font-size: 12px; font-weight: 600; color: var(--advshipping_wpm-primary, #2563eb); white-space: nowrap; }
+.advshipping_wpm-payment-card { padding: var(--advshipping_wpm-padding, 20px); margin: var(--advshipping_wpm-margin, 16px 13px); border: var(--advshipping_wpm-border-width, 1px) var(--advshipping_wpm-border-style, solid) var(--advshipping_wpm-border-color, #dbe4ef); border-radius: var(--advshipping_wpm-border-radius, 12px); background: var(--advshipping_wpm-background, #f8fafc); color: var(--advshipping_wpm-text, #1e293b); }
+
+.advshipping_wpm-payment-card h3 { margin: 0 0 16px; font-size: 17px; line-height: 1.4; color: var(--advshipping_wpm-heading, #0f172a); }
+.advshipping_wpm-payment-options { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+.advshipping_wpm-payment-option { display: flex !important; gap: 10px; align-items: center; padding: 12px; margin-bottom: 8px; background: #fff; border: 1px solid var(--advshipping_wpm-border-color, #dbe4ef); border-radius: 8px; cursor: pointer; font-size: 13px; }
+.advshipping_wpm-payment-option:has(input:checked) { border-color: var(--advshipping_wpm-primary, #2563eb); background: #eff6ff; }
+.advshipping_wpm-payment-option input { margin: 0; accent-color: var(--advshipping_wpm-primary, #2563eb); flex-shrink: 0; }
+.advshipping_wpm-payment-option span { flex: 1; }
+.advshipping_wpm-payment-option strong { margin-left: auto; white-space: nowrap; }
+.advshipping_wpm-payment-option:focus-within { outline: 2px solid var(--advshipping_wpm-primary, #2563eb); outline-offset: 2px; }
+.advshipping_wpm-payment-breakdown { margin: 0 !important; font-size: 14px; }
+.advshipping_wpm-payment-breakdown > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.advshipping_wpm-payment-breakdown dt, .advshipping_wpm-payment-breakdown dd { margin: 0; }
+.advshipping_wpm-payment-breakdown dd { text-align: right; flex-shrink: 0; }
+.advshipping_wpm-payment-breakdown .advshipping_wpm-pay-now { color: var(--advshipping_wpm-primary, #1d4ed8); font-weight: 700; border-top: 1px solid var(--advshipping_wpm-border-color, #dbe4ef); }
+.advshipping_wpm-payment-message { margin: 12px 0 0 !important; font-size: 12px; line-height: 1.7; color: var(--advshipping_wpm-muted, #475569); }
+@media (max-width: 480px) {
+    .advshipping_wpm-payment-option { flex-wrap: wrap; }
+    .advshipping_wpm-payment-option strong { margin-left: 24px; }
+}
