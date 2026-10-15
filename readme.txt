@@ -1,4 +1,4 @@
-=== AdvShipping WPM ===
+=== AdvShippingWPM - Advance Shipping Cost for WooCommerce Checkout ===
 Contributors: wpmethods
 Tags: woocommerce, shipping, cod, advance payment, partial payment
 Requires at least: 5.2
@@ -58,7 +58,7 @@ Legacy reports, exports and third-party dashboards that read the stored payment 
 
 The plugin does not send data to an external service, add tracking or load remote assets. Support links open only when clicked. Payment gateways are separate plugins with their own services and privacy practices.
 
-Collection references, amounts, methods, recording times and staff IDs are stored in WooCommerce order metadata for bookkeeping. Access is controlled by WooCommerce order permissions. Removing the plugin deletes its settings but preserves order payment and collection records. Review order retention under your store's privacy policy.
+Collection references, amounts, methods, recording times and staff IDs are stored in WooCommerce order metadata for bookkeeping. Access is controlled by WooCommerce order permissions. Removing the plugin retains its data by default. If Delete plugin data on uninstall is enabled, uninstall permanently removes plugin settings and payment/collection metadata, including the original full-value metadata and receipt history. WooCommerce orders, order notes, stored order totals and shared database tables are retained. Review order retention under your store's privacy policy.
 
 = Gateway-based payment options =
 
@@ -101,7 +101,7 @@ Use Refresh order analytics in the order's Analytics & help section. For multipl
 
 = Does uninstall remove financial records? =
 
-No. Uninstall removes plugin settings but retains order payment and collection metadata. Deactivation does not delete settings.
+Data is retained by default. Enable Database cleanup > Delete plugin data on uninstall and save settings to permanently remove plugin settings and payment/collection metadata when deleting the plugin. Deactivation never deletes data. There are no separate plugin tables to drop. This is destructive: collection history and the stored full order value are removed; WooCommerce orders, order notes and stored order totals remain unchanged.
 
 == Changelog ==
 
@@ -116,4 +116,4 @@ No. Uninstall removes plugin settings but retains order payment and collection m
 == Upgrade Notice ==
 
 = 1.0.0 =
-Initial WordPress.org release. Existing local settings and order records are preserved through their original option and metadata keys.
+Initial WordPress.org release. Code and stored data use the aswpm prefix; the text domain remains advshipping-wpm. Earlier development prefixes are not migrated.

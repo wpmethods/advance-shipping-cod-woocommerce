@@ -1,5 +1,5 @@
 jQuery(function ($) {
-    const $preview = $('.advshipping_wpm-design-preview #advshipping_wpm-notice-wrap');
+    const $preview = $('.aswpm-design-preview #aswpm-notice-wrap');
     const $fields = $('[data-design-key]');
     if (!$preview.length) return;
 
@@ -18,20 +18,20 @@ jQuery(function ($) {
         });
         const variables = { primary_color: 'primary', background_color: 'background', border_color: 'border-color', text_color: 'text', heading_color: 'heading', muted_color: 'muted' };
         Object.keys(variables).forEach(function (key) {
-            $preview[0].style.setProperty('--advshipping_wpm-' + variables[key], values[key]);
+            $preview[0].style.setProperty('--aswpm-' + variables[key], values[key]);
         });
         ['border_width', 'border_radius'].forEach(function (key) {
-            $preview[0].style.setProperty('--advshipping_wpm-' + key.replace('_', '-'), values[key] + 'px');
+            $preview[0].style.setProperty('--aswpm-' + key.replace('_', '-'), values[key] + 'px');
         });
-        $preview[0].style.setProperty('--advshipping_wpm-border-style', values.border_style);
+        $preview[0].style.setProperty('--aswpm-border-style', values.border_style);
         ['padding', 'margin'].forEach(function (type) {
-            $preview[0].style.setProperty('--advshipping_wpm-' + type, ['top', 'right', 'bottom', 'left'].map(function (side) {
+            $preview[0].style.setProperty('--aswpm-' + type, ['top', 'right', 'bottom', 'left'].map(function (side) {
                 return values[type + '_' + side] + 'px';
             }).join(' '));
         });
     }
 
-    $('.advshipping_wpm-color-picker').each(function () {
+    $('.aswpm-color-picker').each(function () {
         const $field = $(this);
         $field.wpColorPicker({
             change: function (event, ui) { $field.val(ui.color.toString()); updatePreview(); },
@@ -40,7 +40,7 @@ jQuery(function ($) {
     });
     $fields.on('input change', updatePreview);
     updatePreview();
-    if (window.wp && wp.codeEditor && window.advshipping_wpmDesignEditor && advshipping_wpmDesignEditor.settings) {
-        wp.codeEditor.initialize('advshipping_wpm-custom-css', advshipping_wpmDesignEditor.settings);
+    if (window.wp && wp.codeEditor && window.aswpmDesignEditor && aswpmDesignEditor.settings) {
+        wp.codeEditor.initialize('aswpm-custom-css', aswpmDesignEditor.settings);
     }
 });
